@@ -95,7 +95,10 @@ class AdvertisedDeviceCallbacks: public NimBLEAdvertisedDeviceCallbacks {
     void onResult(NimBLEAdvertisedDevice* advertisedDevice) {
         if (advertisedDevice->haveName()) {
             Serial.printf("Device name: %s\r\n", advertisedDevice->getName().c_str());
-            if ((advertisedDevice->getName().find("Zephyr Heartrate Sensor") != std::string::npos) || (advertisedDevice->getName().find("Zephyr Health Thermometer") != std::string::npos))
+            if ((advertisedDevice->getName().find("Zephyr Heartrate Sensor") != std::string::npos) 
+               || (advertisedDevice->getName().find("Zephyr Health Thermometer") != std::string::npos) 
+               || (advertisedDevice->getName().find("Zephyr Peripheral Sample Long") != std::string::npos)
+               || (advertisedDevice->getName().find("ESP peripheral") != std::string::npos))
             {
                 NimBLEDevice::getScan()->stop();
                 advDevice = advertisedDevice;
@@ -132,6 +135,7 @@ void notifyCB(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_t* pData,
 	uint32_t mantissa;
 	int8_t exponent;
     int heartrate;
+    int battery;
     if (std::string(pRemoteCharacteristic->getRemoteService()->getUUID()).find("1809") != std::string::npos)
     {
         /* temperature value display */
@@ -148,12 +152,10 @@ void notifyCB(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_t* pData,
         str += ", Temperature = " + double_to_string(temperature);
         Serial.println(str.c_str());
     }
-    else {
 
-    }
     if (std::string(pRemoteCharacteristic->getRemoteService()->getUUID()).find("180d") != std::string::npos) {
         /* temperature value display */
-	    heartrate = ((uint8_t *)pData)[1]  ;
+	    //heartrate = ((uint8_t *)pData)[1]  ;
         std::string str = (isNotify == true) ? "Notification" : "Indication";
         str += " from ";
         /** NimBLEAddress and NimBLEUUID have std::string operators */
@@ -161,6 +163,35 @@ void notifyCB(NimBLERemoteCharacteristic* pRemoteCharacteristic, uint8_t* pData,
         str += ": Service = " + std::string(pRemoteCharacteristic->getRemoteService()->getUUID());
         str += ", Characteristic = " + std::string(pRemoteCharacteristic->getUUID());
         str += ", Heart Rate Measurement = " + uint8_to_string(((uint8_t *)pData)[1]);
+        Serial.println(str.c_str());
+    }
+
+    if (std::string(pRemoteCharacteristic->getRemoteService()->getUUID()).find("180f") != std::string::npos) {
+        /* temperature value display */
+	    //battery = ((uint8_t *)pData)[0]  ;
+        std::string str = (isNotify == true) ? "Notification" : "Indication";
+        str += " from ";
+        /** NimBLEAddress and NimBLEUUID have std::string operators */
+        str += std::string(pRemoteCharacteristic->getRemoteService()->getClient()->getPeerAddress());
+        str += ": Service = " + std::string(pRemoteCharacteristic->getRemoteService()->getUUID());
+        str += ", Characteristic = " + std::string(pRemoteCharacteristic->getUUID());
+        str += ", Battery = " + uint8_to_string(((uint8_t *)pData)[0]) + "% received  " ;
+        Serial.println(str.c_str());
+    }
+    if (std::string(pRemoteCharacteristic->getRemoteService()->getUUID()).find("181a") != std::string::npos)
+    {
+        /* temperature value display */
+	    mantissa = ((uint8_t *)pData)[0] + (((uint8_t *)pData)[1] <<8) ;
+    
+	    exponent = -2;
+	    temperature = (double)mantissa * pow(10, exponent);
+        std::string str = (isNotify == true) ? "Notification" : "Indication";
+        str += " from ";
+        /** NimBLEAddress and NimBLEUUID have std::string operators */
+        str += std::string(pRemoteCharacteristic->getRemoteService()->getClient()->getPeerAddress());
+        str += ": Service = " + std::string(pRemoteCharacteristic->getRemoteService()->getUUID());
+        str += ", Characteristic = " + std::string(pRemoteCharacteristic->getUUID());
+        str += ", Temperature = " + double_to_string(temperature) + "oC received  ";
         Serial.println(str.c_str());
     }
 }
@@ -356,6 +387,177 @@ bool connectToServer() {
                     return false;
                 }
             }
+        }
+
+    } else {
+    }
+
+    pSvc = pClient->getService(std::string("180F"));
+    if(pSvc) {     /** make sure it's not null */
+        pChr = pSvc->getCharacteristic(std::string("2A19"));
+
+        if(pChr) {     /** make sure it's not null */
+            if(pChr->canRead()) {
+                Serial.print(pChr->getUUID().toString().c_str());
+                Serial.print(" Value: ");
+                Serial.println(pChr->readValue().c_str());
+            }
+
+            if(pChr->canWrite()) {
+                if(pChr->writeValue("Tasty")) {
+                    Serial.print("Wrote new value to: ");
+                    Serial.println(pChr->getUUID().toString().c_str());
+                }
+                else {
+                    /** Disconnect if write failed */
+                    pClient->disconnect();
+                    return false;
+                }
+
+                if(pChr->canRead()) {
+                    Serial.print("The value of: ");
+                    Serial.print(pChr->getUUID().toString().c_str());
+                    Serial.print(" is now: ");
+                    Serial.println(pChr->readValue().c_str());
+                }
+            }
+
+            /** registerForNotify() has been deprecated and replaced with subscribe() / unsubscribe().
+             *  Subscribe parameter defaults are: notifications=true, notifyCallback=nullptr, response=false.
+             *  Unsubscribe parameter defaults are: response=false.
+             */
+            if(pChr->canNotify()) {
+                //if(!pChr->registerForNotify(notifyCB)) {
+                if(!pChr->subscribe(true, notifyCB)) {
+                    /** Disconnect if subscribe failed */
+                    pClient->disconnect();
+                    return false;
+                }
+            }
+            else if(pChr->canIndicate()) {
+                /** Send false as first argument to subscribe to indications instead of notifications */
+                //if(!pChr->registerForNotify(notifyCB, false)) {
+                if(!pChr->subscribe(false, notifyCB)) {
+                    /** Disconnect if subscribe failed */
+                    pClient->disconnect();
+                    return false;
+                }
+            }
+            
+        }
+
+    } else {
+    }
+
+    pSvc = pClient->getService(std::string("1805"));
+    if(pSvc) {     /** make sure it's not null */
+        pChr = pSvc->getCharacteristic(std::string("2A2B"));
+
+        if(pChr) {     /** make sure it's not null */
+            if(pChr->canRead()) {
+                Serial.print(pChr->getUUID().toString().c_str());
+                Serial.print(" Value: ");
+                Serial.println(pChr->readValue().c_str());
+            }
+
+            if(pChr->canWrite()) {
+                if(pChr->writeValue("Tasty")) {
+                    Serial.print("Wrote new value to: ");
+                    Serial.println(pChr->getUUID().toString().c_str());
+                }
+                else {
+                    /** Disconnect if write failed */
+                    pClient->disconnect();
+                    return false;
+                }
+
+                if(pChr->canRead()) {
+                    Serial.print("The value of: ");
+                    Serial.print(pChr->getUUID().toString().c_str());
+                    Serial.print(" is now: ");
+                    Serial.println(pChr->readValue().c_str());
+                }
+            }
+
+            /** registerForNotify() has been deprecated and replaced with subscribe() / unsubscribe().
+             *  Subscribe parameter defaults are: notifications=true, notifyCallback=nullptr, response=false.
+             *  Unsubscribe parameter defaults are: response=false.
+             */
+            if(pChr->canNotify()) {
+                //if(!pChr->registerForNotify(notifyCB)) {
+                if(!pChr->subscribe(true, notifyCB)) {
+                    /** Disconnect if subscribe failed */
+                    pClient->disconnect();
+                    return false;
+                }
+            }
+            else if(pChr->canIndicate()) {
+                /** Send false as first argument to subscribe to indications instead of notifications */
+                //if(!pChr->registerForNotify(notifyCB, false)) {
+                if(!pChr->subscribe(false, notifyCB)) {
+                    /** Disconnect if subscribe failed */
+                    pClient->disconnect();
+                    return false;
+                }
+            }
+            
+        }
+
+    } else {
+    }
+
+    pSvc = pClient->getService(std::string("181A"));
+    if(pSvc) {     /** make sure it's not null */
+        pChr = pSvc->getCharacteristic(std::string("2A6E"));
+
+        if(pChr) {     /** make sure it's not null */
+            if(pChr->canRead()) {
+                Serial.print(pChr->getUUID().toString().c_str());
+                Serial.print(" Value: ");
+                Serial.println(pChr->readValue().c_str());
+            }
+
+            if(pChr->canWrite()) {
+                if(pChr->writeValue("Tasty")) {
+                    Serial.print("Wrote new value to: ");
+                    Serial.println(pChr->getUUID().toString().c_str());
+                }
+                else {
+                    /** Disconnect if write failed */
+                    pClient->disconnect();
+                    return false;
+                }
+
+                if(pChr->canRead()) {
+                    Serial.print("The value of: ");
+                    Serial.print(pChr->getUUID().toString().c_str());
+                    Serial.print(" is now: ");
+                    Serial.println(pChr->readValue().c_str());
+                }
+            }
+
+            /** registerForNotify() has been deprecated and replaced with subscribe() / unsubscribe().
+             *  Subscribe parameter defaults are: notifications=true, notifyCallback=nullptr, response=false.
+             *  Unsubscribe parameter defaults are: response=false.
+             */
+            if(pChr->canNotify()) {
+                //if(!pChr->registerForNotify(notifyCB)) {
+                if(!pChr->subscribe(true, notifyCB)) {
+                    /** Disconnect if subscribe failed */
+                    pClient->disconnect();
+                    return false;
+                }
+            }
+            else if(pChr->canIndicate()) {
+                /** Send false as first argument to subscribe to indications instead of notifications */
+                //if(!pChr->registerForNotify(notifyCB, false)) {
+                if(!pChr->subscribe(false, notifyCB)) {
+                    /** Disconnect if subscribe failed */
+                    pClient->disconnect();
+                    return false;
+                }
+            }
+            
         }
 
     } else {
